@@ -1,9 +1,14 @@
+import ssl
 import socket
 from pathlib import Path
 
 HOST = "0.0.0.0"
-PORT = 8080
+PORT = 443
 ROOT = Path(__file__).resolve().parent
+with ROOT.joinpath('domain.txt').open(encoding='utf-8') as f:
+    DOMAIN = f.readline().strip()
+CERT = Path(f"/etc/letsencrypt/live/{DOMAIN}/fullchain.pem")
+KEY = Path(f"/etc/letsencrypt/live/{DOMAIN}/privkey.pem")
 
 
 def recv_headers(conn):
@@ -43,26 +48,47 @@ def handle(conn):
             b"\r\n" + body
         )
         conn.shutdown(socket.SHUT_WR)
-    except TimeoutError:
+    except (TimeoutError, ssl.SSLError, OSError):
         pass
     finally:
         conn.close()
 
 
+def tls_context():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(CERT, KEY)
+    return ctx
+
+
+def handshake(ctx, conn):
+    conn.settimeout(5)
+    try:
+        return ctx.wrap_socket(conn, server_side=True)
+    except (ssl.SSLError, TimeoutError, OSError):
+        conn.close()
+        return None
+
+
 def main():
+    if DOMAIN == "example.com":
+        raise SystemExit("server.py의 DOMAIN을 실제 도메인으로 바꾸세요")
+    ctx = tls_context()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, PORT))
         server.listen(8)
         server.settimeout(0.5)
-        print(f"http://127.0.0.1:{PORT}/")
+        print(f"https://{DOMAIN}/")
         try:
             while True:
                 try:
                     conn, _ = server.accept()
                 except TimeoutError:
                     continue
-                handle(conn)
+                tls = handshake(ctx, conn)
+                if tls is not None:
+                    handle(tls)
         except KeyboardInterrupt:
             print("\nstopped")
 
