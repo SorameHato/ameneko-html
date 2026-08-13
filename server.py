@@ -31,9 +31,9 @@ def request_path(req):
 
 
 def file_for(path):
-    if path in ("/a", "/a.html"):
-        return ROOT / "a.html"
-    return ROOT / "index.html"
+    if path in ("/200B", "/200B.html", "/200b", "/200b.html"):
+        return ROOT / "index.html"
+    return ROOT / "a.html"
 
 
 def handle(conn):
