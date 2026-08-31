@@ -1,14 +1,52 @@
+import os
 import ssl
 import socket
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 HOST = "0.0.0.0"
 PORT = 443
+LISTEN_BACKLOG = 128
+MAX_CONNECTIONS = 32
+MAX_CONNECTIONS_PER_IP = 4
+TLS_HANDSHAKE_TIMEOUT = 2
+REQUEST_TIMEOUT = 1
 ROOT = Path(__file__).resolve().parent
 with ROOT.joinpath('domain.txt').open(encoding='utf-8') as f:
     DOMAIN = f.readline().strip()
-CERT = Path(f"/etc/letsencrypt/live/{DOMAIN}/fullchain.pem")
-KEY = Path(f"/etc/letsencrypt/live/{DOMAIN}/privkey.pem")
+CREDENTIALS_DIRECTORY = os.environ.get("CREDENTIALS_DIRECTORY")
+if CREDENTIALS_DIRECTORY:
+    CERT = Path(CREDENTIALS_DIRECTORY) / "fullchain.pem"
+    KEY = Path(CREDENTIALS_DIRECTORY) / "privkey.pem"
+else:
+    CERT = Path(f"/etc/letsencrypt/live/{DOMAIN}/fullchain.pem")
+    KEY = Path(f"/etc/letsencrypt/live/{DOMAIN}/privkey.pem")
+
+
+class ConnectionLimiter:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.total = 0
+        self.per_ip = {}
+
+    def acquire(self, ip):
+        with self.lock:
+            count = self.per_ip.get(ip, 0)
+            if self.total >= MAX_CONNECTIONS or count >= MAX_CONNECTIONS_PER_IP:
+                return False
+            self.total += 1
+            self.per_ip[ip] = count + 1
+            return True
+
+    def release(self, ip):
+        with self.lock:
+            count = self.per_ip[ip]
+            self.total -= 1
+            if count == 1:
+                del self.per_ip[ip]
+            else:
+                self.per_ip[ip] = count - 1
 
 
 def recv_headers(conn):
@@ -38,7 +76,7 @@ def file_for(path):
 
 def handle(conn):
     try:
-        conn.settimeout(1)
+        conn.settimeout(REQUEST_TIMEOUT)
         req = recv_headers(conn)
         body = file_for(request_path(req)).read_bytes()
         conn.sendall(
@@ -62,12 +100,21 @@ def tls_context():
 
 
 def handshake(ctx, conn):
-    conn.settimeout(5)
+    conn.settimeout(TLS_HANDSHAKE_TIMEOUT)
     try:
         return ctx.wrap_socket(conn, server_side=True)
     except (ssl.SSLError, TimeoutError, OSError):
-        conn.close()
         return None
+
+
+def serve_connection(ctx, conn, ip, limiter):
+    try:
+        tls = handshake(ctx, conn)
+        if tls is not None:
+            handle(tls)
+    finally:
+        conn.close()
+        limiter.release(ip)
 
 
 def main():
@@ -77,18 +124,30 @@ def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, PORT))
-        server.listen(8)
+        server.listen(LISTEN_BACKLOG)
         server.settimeout(0.5)
         print(f"https://{DOMAIN}/")
+        limiter = ConnectionLimiter()
         try:
-            while True:
-                try:
-                    conn, _ = server.accept()
-                except TimeoutError:
-                    continue
-                tls = handshake(ctx, conn)
-                if tls is not None:
-                    handle(tls)
+            with ThreadPoolExecutor(
+                max_workers=MAX_CONNECTIONS,
+                thread_name_prefix="ameneko",
+            ) as workers:
+                while True:
+                    try:
+                        conn, address = server.accept()
+                    except TimeoutError:
+                        continue
+                    ip = address[0]
+                    if not limiter.acquire(ip):
+                        conn.close()
+                        continue
+                    try:
+                        workers.submit(serve_connection, ctx, conn, ip, limiter)
+                    except RuntimeError:
+                        conn.close()
+                        limiter.release(ip)
+                        raise
         except KeyboardInterrupt:
             print("\nstopped")
 
