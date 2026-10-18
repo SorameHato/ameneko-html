@@ -46,7 +46,7 @@ if ! getent passwd ameneko >/dev/null 2>&1; then
 fi
 
 install -d -o root -g root -m 0755 "$INSTALL_DIR"
-# HTML files are mount points. The service bind-mounts the home copies over them.
+# The service bind-mounts the home directory over this directory.
 install -o root -g root -m 0644 \
     "$SOURCE_DIR/server.py" \
     "$SOURCE_DIR/domain.txt" \
