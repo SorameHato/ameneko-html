@@ -4,6 +4,7 @@ import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import parse_qs
 
 HOST = "0.0.0.0"
 PORT = 443
@@ -61,17 +62,24 @@ def recv_headers(conn):
     return buf
 
 
-def request_path(req):
+def request_target(req):
     parts = req.split(b"\r\n", 1)[0].split(b" ")
     if len(parts) < 2:
         return "/"
-    return parts[1].decode("ascii", "replace").split("?", 1)[0]
+    return parts[1].decode("ascii", "replace")
 
 
-def file_for(path):
+def has_t_param(target):
+    query = target.partition("?")[2]
+    return "t" in parse_qs(query, keep_blank_values=True)
+
+
+def file_for(path, viewer=False):
     if path in ("/200B", "/200B.html", "/200b", "/200b.html"):
         return ROOT / "index.html"
     if path in ("/l", "/l.html"):
+        if viewer:
+            return ROOT / "l-view.html"
         return ROOT / "l.html"
     return ROOT / "a.html"
 
@@ -80,7 +88,8 @@ def handle(conn):
     try:
         conn.settimeout(REQUEST_TIMEOUT)
         req = recv_headers(conn)
-        body = file_for(request_path(req)).read_bytes()
+        target = request_target(req)
+        body = file_for(target.split("?", 1)[0], has_t_param(target)).read_bytes()
         conn.sendall(
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/html;charset=utf-8\r\n"

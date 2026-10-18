@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Long Tweet</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   "Noto Sans KR", "Noto Sans JP", sans-serif;
+      color-scheme: light dark;
+      --bg: #f4f6f8;
+      --panel: #fff;
+      --text: #17202a;
+      --muted: #657181;
+      --border: #d9e0e7;
+      --accent: #1677ff;
+      --error: #c62828;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101419;
+        --panel: #181e25;
+        --text: #edf2f7;
+        --muted: #a4b0bd;
+        --border: #35404c;
+        --accent: #5b9cff;
+        --error: #ff8585;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    main {
+      width: min(40rem, calc(100% - 2rem));
+      margin: 2.5rem auto 3rem;
+    }
+    .content {
+      margin: 0;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      font-size: 1.05rem;
+    }
+    .content.err { color: var(--error); white-space: normal; }
+    .cta { margin: 2.5rem 0 0; }
+    .cta a {
+      color: var(--accent);
+      font-weight: 650;
+      text-underline-offset: .15em;
+    }
+    .cta a:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p id="content" class="content">본문을 불러오는 중…</p>
+    <p class="cta"><a href="/l">나도 긴 트윗 작성해보기 →</a></p>
+  </main>
+  <script>
+    "use strict";
+
+    function fromBase64Url(text) {
+      if (!/^[A-Za-z0-9_-]*$/.test(text)) {
+        throw new Error("Base64url 데이터에 허용되지 않는 문자가 있습니다.");
+      }
+      const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    async function streamTransform(bytes, format, operation) {
+      const StreamClass = operation === "compress"
+        ? window.CompressionStream
+        : window.DecompressionStream;
+
+      if (!StreamClass) {
+        throw new Error("이 브라우저는 압축 스트림 API를 지원하지 않습니다.");
+      }
+
+      const stream = new Blob([bytes]).stream().pipeThrough(new StreamClass(format));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    async function decodeValue(value) {
+      if (!value || !/^[zd]/.test(value)) {
+        throw new Error("데이터는 z 또는 d 접두사로 시작해야 합니다.");
+      }
+
+      const mode = value[0];
+      const encodedBytes = fromBase64Url(value.slice(1));
+      const MAX_DECODED_BYTES = 2 * 1024 * 1024;
+      let bytes;
+
+      if (mode === "z") {
+        bytes = await streamTransform(encodedBytes, "deflate", "decompress");
+      } else {
+        bytes = encodedBytes;
+      }
+
+      if (bytes.length > MAX_DECODED_BYTES) {
+        throw new Error("복원된 본문이 데모의 최대 허용 크기(2 MiB)를 초과합니다.");
+      }
+
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    }
+
+    (async function showTweet() {
+      const content = document.getElementById("content");
+      try {
+        const value = new URL(window.location.href).searchParams.get("t");
+        if (value === null) throw new Error("표시할 본문이 없습니다.");
+        content.textContent = await decodeValue(value);
+      } catch (error) {
+        content.className = "content err";
+        content.textContent = error.message || "본문을 표시하지 못했습니다.";
+      }
+    })();
+  </script>
+</body>
+</html>

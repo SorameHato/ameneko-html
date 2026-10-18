@@ -70,6 +70,8 @@
       font: inherit;
       padding: .75rem .8rem;
     }
+    #input-url { min-height: 6rem; }
+    #output-url { min-height: 2.25rem; }
     textarea:focus, button:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: 2px;
@@ -138,6 +140,7 @@
         <span class="stat" id="payload-size">페이로드: —</span>
       </div>
       <div class="actions">
+        <button id="tweet-button" type="button" disabled>이 URL을 트윗하기</button>
         <button id="copy-button" type="button" disabled>URL 복사</button>
         <button id="open-button" type="button" disabled>URL 열기</button>
       </div>
@@ -282,8 +285,10 @@
         $("url-length").textContent = `URL 길이: ${output.length}자`;
         $("encoding-mode").textContent = `인코딩: ${encoded.mode}`;
         $("payload-size").textContent = `압축 데이터: ${encoded.bytes.toLocaleString()}바이트`;
+        $("tweet-button").disabled = false;
         $("copy-button").disabled = false;
         $("open-button").disabled = false;
+        $("tweet-button").dataset.url = output;
         $("copy-button").dataset.url = output;
         $("open-button").dataset.url = output;
         setStatus("URL을 생성했습니다.", "ok");
@@ -298,9 +303,16 @@
       $("url-length").textContent = "URL 길이: —";
       $("encoding-mode").textContent = "인코딩: —";
       $("payload-size").textContent = "페이로드: —";
+      $("tweet-button").disabled = true;
       $("copy-button").disabled = true;
       $("open-button").disabled = true;
       setStatus("");
+    });
+
+    $("tweet-button").addEventListener("click", () => {
+      const url = $("tweet-button").dataset.url;
+      const intent = "https://x.com/intent/tweet?text=" + encodeURIComponent(url);
+      window.open(intent, "_blank", "noopener,noreferrer");
     });
 
     $("copy-button").addEventListener("click", async () => {
