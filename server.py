@@ -71,6 +71,8 @@ def request_path(req):
 def file_for(path):
     if path in ("/200B", "/200B.html", "/200b", "/200b.html"):
         return ROOT / "index.html"
+    if path in ("/l", "/l.html"):
+        return ROOT / "l.html"
     return ROOT / "a.html"
 
 

@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Long Tweet — URL 텍스트 인코더</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   "Noto Sans KR", "Noto Sans JP", sans-serif;
+      color-scheme: light dark;
+      --bg: #f4f6f8;
+      --panel: #fff;
+      --text: #17202a;
+      --muted: #657181;
+      --border: #d9e0e7;
+      --accent: #1677ff;
+      --accent-contrast: #fff;
+      --success: #16803c;
+      --error: #c62828;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101419;
+        --panel: #181e25;
+        --text: #edf2f7;
+        --muted: #a4b0bd;
+        --border: #35404c;
+        --accent: #5b9cff;
+        --accent-contrast: #08111d;
+        --success: #69d58b;
+        --error: #ff8585;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    header {
+      padding: 1.25rem max(1rem, calc((100vw - 860px) / 2));
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 1.25rem; }
+    header p { margin: .3rem 0 0; color: var(--muted); font-size: .92rem; }
+    main { width: min(860px, calc(100% - 2rem)); margin: 1.5rem auto 3rem; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.1rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 2px 8px rgb(0 0 0 / 3%);
+    }
+    h2 { font-size: 1.05rem; margin: 0 0 .8rem; }
+    label { display: block; font-weight: 650; margin: .85rem 0 .35rem; }
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 180px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+      padding: .75rem .8rem;
+    }
+    textarea:focus, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+    button {
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: .65rem 1rem;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+      background: var(--panel);
+      color: var(--text);
+    }
+    button.primary { background: var(--accent); color: var(--accent-contrast); border-color: transparent; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .result {
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--bg);
+      padding: .75rem;
+      min-height: 3rem;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: .88rem;
+    }
+    .stats { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .75rem; }
+    .stat {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: .25rem .65rem;
+      font-size: .84rem;
+    }
+    #status { min-height: 1.5em; margin: .6rem 0 0; font-size: .9rem; }
+    #status.ok { color: var(--success); }
+    #status.err { color: var(--error); }
+    details summary { cursor: pointer; font-weight: 650; }
+    code { overflow-wrap: anywhere; }
+    footer { color: var(--muted); font-size: .85rem; text-align: center; margin-top: 1.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Long Tweet</h1>
+    <p>텍스트를 브라우저에서 압축·인코딩해 URL에 담습니다. 서버에 본문을 저장하지 않습니다.</p>
+  </header>
+
+  <main>
+    <section class="panel" aria-labelledby="encode-heading">
+      <h2 id="encode-heading">텍스트 인코딩</h2>
+
+      <label for="source-text">본문</label>
+      <textarea id="source-text" placeholder="한국어 또는 日本語の文章を入力してください。"></textarea>
+      <div class="actions">
+        <button class="primary" id="encode-button" type="button">URL 만들기</button>
+        <button id="clear-button" type="button">비우기</button>
+      </div>
+
+      <label for="output-url">생성된 URL</label>
+      <div id="output-url" class="result" aria-live="polite">아직 생성된 URL이 없습니다.</div>
+      <div class="stats" aria-live="polite">
+        <span class="stat" id="url-length">URL 길이: —</span>
+        <span class="stat" id="encoding-mode">인코딩: —</span>
+        <span class="stat" id="payload-size">페이로드: —</span>
+      </div>
+      <div class="actions">
+        <button id="copy-button" type="button" disabled>URL 복사</button>
+        <button id="open-button" type="button" disabled>URL 열기</button>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="decode-heading">
+      <h2 id="decode-heading">URL 디코딩</h2>
+      <label for="input-url">인코딩된 URL 또는 t 매개변수 값</label>
+      <textarea id="input-url" placeholder="https://example.com/longtweet?t=z... 또는 z..."></textarea>
+      <div class="actions">
+        <button class="primary" id="decode-button" type="button">본문 복원</button>
+      </div>
+      <label for="decoded-text">복원된 본문</label>
+      <textarea id="decoded-text" readonly placeholder="복원된 텍스트가 여기에 표시됩니다."></textarea>
+    </section>
+
+    <p id="status" role="status" aria-live="polite"></p>
+
+    <section class="panel">
+      <details>
+        <summary>작동 방식 및 참고 사항</summary>
+        <ul>
+          <li><code>z</code> 접두사: DEFLATE 압축 후 Base64url 인코딩.</li>
+          <li><code>d</code> 접두사: 압축하지 않고 UTF-8 바이트를 Base64url 인코딩.</li>
+          <li>압축한 바이트가 더 짧을 때만 압축본을 사용합니다.</li>
+          <li>브라우저의 <code>CompressionStream</code> / <code>DecompressionStream</code> API를 사용합니다. 지원되지 않는 브라우저에서는 동작하지 않을 수 있습니다.</li>
+          <li>이 예제는 데모입니다. 배포 전 URL 길이 제한, 오류 처리, 압축 해제 크기 제한 및 X의 링크 처리 동작을 실제 환경에서 검증하세요.</li>
+          <li>본문을 화면에 표시할 때는 HTML로 삽입하지 말고 <code>textContent</code> 또는 textarea의 <code>value</code>를 사용하세요.</li>
+        </ul>
+      </details>
+    </section>
+    <footer>클라이언트 측 데모 · 텍스트는 이 페이지에서 처리됩니다.</footer>
+  </main>
+
+  <script>
+    "use strict";
+
+    // 생성된 URL의 기본 주소. 결과에는 ?t=... 가 붙습니다.
+    const BASE_URL = "https://pba.im/l";
+
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(message, type = "") {
+      const status = $("status");
+      status.textContent = message;
+      status.className = type;
+    }
+
+    function toBase64Url(bytes) {
+      // 큰 배열을 한 번에 spread하지 않아 스택/인자 한도 문제를 피합니다.
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
+
+    function fromBase64Url(text) {
+      if (!/^[A-Za-z0-9_-]*$/.test(text)) {
+        throw new Error("Base64url 데이터에 허용되지 않는 문자가 있습니다.");
+      }
+      const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    async function streamTransform(bytes, format, operation) {
+      const StreamClass = operation === "compress"
+        ? window.CompressionStream
+        : window.DecompressionStream;
+
+      if (!StreamClass) {
+        throw new Error("이 브라우저는 압축 스트림 API를 지원하지 않습니다.");
+      }
+
+      const stream = new Blob([bytes]).stream().pipeThrough(new StreamClass(format));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    async function encodeText(text) {
+      const original = new TextEncoder().encode(text);
+
+      // 빈 문자열도 d 접두사와 빈 페이로드로 정상 처리됩니다.
+      if (original.length === 0) return { value: "d", mode: "압축 안 함", bytes: 0 };
+
+      const compressed = await streamTransform(original, "deflate", "compress");
+      if (compressed.length < original.length) {
+        return { value: "z" + toBase64Url(compressed), mode: "DEFLATE + Base64url", bytes: compressed.length };
+      }
+      return { value: "d" + toBase64Url(original), mode: "Base64url (압축 안 함)", bytes: original.length };
+    }
+
+    async function decodeValue(value) {
+      if (!value || !/^[zd]/.test(value)) {
+        throw new Error("데이터는 z 또는 d 접두사로 시작해야 합니다.");
+      }
+
+      const mode = value[0];
+      const encodedBytes = fromBase64Url(value.slice(1));
+
+      // 데모용 기본 제한. 서비스에서는 요구사항에 맞게 더 엄격하게 설정하세요.
+      const MAX_DECODED_BYTES = 2 * 1024 * 1024;
+      let bytes;
+
+      if (mode === "z") {
+        bytes = await streamTransform(encodedBytes, "deflate", "decompress");
+      } else {
+        bytes = encodedBytes;
+      }
+
+      if (bytes.length > MAX_DECODED_BYTES) {
+        throw new Error("복원된 본문이 데모의 최대 허용 크기(2 MiB)를 초과합니다.");
+      }
+
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    }
+
+    function getBaseUrl() {
+      const url = new URL(BASE_URL);
+      if (url.protocol !== "https:" && url.protocol !== "http:") {
+        throw new Error("서비스 URL은 http 또는 https 주소여야 합니다.");
+      }
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    }
+
+    $("encode-button").addEventListener("click", async () => {
+      try {
+        setStatus("");
+        const baseUrl = getBaseUrl();
+        const encoded = await encodeText($("source-text").value);
+        const resultUrl = new URL(baseUrl);
+        resultUrl.searchParams.set("t", encoded.value);
+        const output = resultUrl.toString();
+
+        $("output-url").textContent = output;
+        $("url-length").textContent = `URL 길이: ${output.length}자`;
+        $("encoding-mode").textContent = `인코딩: ${encoded.mode}`;
+        $("payload-size").textContent = `압축 데이터: ${encoded.bytes.toLocaleString()}바이트`;
+        $("copy-button").disabled = false;
+        $("open-button").disabled = false;
+        $("copy-button").dataset.url = output;
+        $("open-button").dataset.url = output;
+        setStatus("URL을 생성했습니다.", "ok");
+      } catch (error) {
+        setStatus(error.message || "URL 생성 중 오류가 발생했습니다.", "err");
+      }
+    });
+
+    $("clear-button").addEventListener("click", () => {
+      $("source-text").value = "";
+      $("output-url").textContent = "아직 생성된 URL이 없습니다.";
+      $("url-length").textContent = "URL 길이: —";
+      $("encoding-mode").textContent = "인코딩: —";
+      $("payload-size").textContent = "페이로드: —";
+      $("copy-button").disabled = true;
+      $("open-button").disabled = true;
+      setStatus("");
+    });
+
+    $("copy-button").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText($("copy-button").dataset.url);
+        setStatus("URL을 클립보드에 복사했습니다.", "ok");
+      } catch {
+        setStatus("클립보드 접근에 실패했습니다. URL을 직접 선택해 복사하세요.", "err");
+      }
+    });
+
+    $("open-button").addEventListener("click", () => {
+      const url = $("open-button").dataset.url;
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+
+    $("decode-button").addEventListener("click", async () => {
+      try {
+        setStatus("");
+        const raw = $("input-url").value.trim();
+        if (!raw) throw new Error("URL 또는 t 매개변수 값을 입력하세요.");
+
+        let value = raw;
+        if (/^https?:\/\//i.test(raw)) {
+          value = new URL(raw).searchParams.get("t") || "";
+          if (!value) throw new Error("URL에 t 매개변수가 없습니다.");
+        } else if (raw.includes("=") && !/^[zd]/.test(raw)) {
+          // t=z... 형식도 허용합니다.
+          const params = new URLSearchParams(raw);
+          value = params.get("t") || "";
+        }
+
+        const text = await decodeValue(value);
+        $("decoded-text").value = text;
+        setStatus("본문을 복원했습니다.", "ok");
+      } catch (error) {
+        $("decoded-text").value = "";
+        setStatus(error.message || "디코딩 중 오류가 발생했습니다.", "err");
+      }
+    });
+
+    // 페이지가 ?t=...로 열렸다면 본문을 자동 복원합니다.
+    (async function loadFromQuery() {
+      try {
+        const current = new URL(window.location.href);
+        const value = current.searchParams.get("t");
+        if (value !== null) {
+          $("input-url").value = window.location.href;
+          $("decoded-text").value = await decodeValue(value);
+          setStatus("URL의 본문을 복원했습니다.", "ok");
+        }
+      } catch (error) {
+        setStatus("URL의 본문을 복원하지 못했습니다: " + (error.message || "잘못된 데이터"), "err");
+      }
+    })();
+  </script>
+</body>
+</html>

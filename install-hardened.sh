@@ -18,7 +18,7 @@ if [ "$DOMAIN" != "pba.im" ]; then
     exit 1
 fi
 
-for file in server.py domain.txt index.html a.html ameneko-html.service restart-ameneko-html; do
+for file in server.py domain.txt index.html a.html l.html ameneko-html.service restart-ameneko-html; do
     if [ ! -f "$SOURCE_DIR/$file" ]; then
         echo "Missing deployment file: $SOURCE_DIR/$file" >&2
         exit 1
@@ -46,6 +46,7 @@ install -o root -g root -m 0644 \
     "$SOURCE_DIR/domain.txt" \
     "$SOURCE_DIR/index.html" \
     "$SOURCE_DIR/a.html" \
+    "$SOURCE_DIR/l.html" \
     "$INSTALL_DIR/"
 
 if [ ! -f "$BACKUP_PATH" ]; then
