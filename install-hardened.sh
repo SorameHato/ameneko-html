@@ -7,6 +7,11 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 SOURCE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+HTML_DIR=/home/soramehato/ameneko-html
+if [ "$SOURCE_DIR" != "$HTML_DIR" ]; then
+    echo "Run this installer from $HTML_DIR. Found: $SOURCE_DIR" >&2
+    exit 1
+fi
 SERVICE_PATH=/etc/systemd/system/ameneko-html.service
 BACKUP_PATH=/etc/systemd/system/ameneko-html.service.pre-hardening
 INSTALL_DIR=/opt/ameneko-html
@@ -41,6 +46,7 @@ if ! getent passwd ameneko >/dev/null 2>&1; then
 fi
 
 install -d -o root -g root -m 0755 "$INSTALL_DIR"
+# HTML files are mount points. The service bind-mounts the home copies over them.
 install -o root -g root -m 0644 \
     "$SOURCE_DIR/server.py" \
     "$SOURCE_DIR/domain.txt" \
