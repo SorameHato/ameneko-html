@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Long Tweet — URL 텍스트 인코더</title>
+  <title>TwExtender</title>
   <style>
     :root {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -18,6 +18,7 @@
       --accent: #1677ff;
       --accent-contrast: #fff;
       --success: #16803c;
+      --warning: #9a6200;
       --error: #c62828;
     }
     @media (prefers-color-scheme: dark) {
@@ -30,6 +31,7 @@
         --accent: #5b9cff;
         --accent-contrast: #08111d;
         --success: #69d58b;
+        --warning: #ffcc66;
         --error: #ff8585;
       }
     }
@@ -120,9 +122,11 @@
       padding: .25rem .65rem;
       font-size: .84rem;
     }
-    #status { min-height: 1.5em; margin: .6rem 0 0; font-size: .9rem; }
-    #status.ok { color: var(--success); }
-    #status.err { color: var(--error); }
+    .status { margin: .75rem 0 0; font-size: .9rem; }
+    .status:empty { margin: 0; }
+    .status.ok { color: var(--success); }
+    .status.warn { color: var(--warning); }
+    .status.err { color: var(--error); }
     details summary { cursor: pointer; font-weight: 650; }
     code { overflow-wrap: anywhere; }
     footer { color: var(--muted); font-size: .85rem; text-align: center; margin-top: 1.5rem; }
@@ -130,8 +134,8 @@
 </head>
 <body>
   <header>
-    <h1>Long Tweet</h1>
-    <p>텍스트를 브라우저에서 압축·인코딩해 URL에 담습니다. 서버에 본문을 저장하지 않습니다.</p>
+    <h1>TwExtender</h1>
+    <p>쓸 데 없는 Grok이 붙어서 더욱 비싸진 X Premium에 가입하지 않아도, 긴 트윗을 쓸 수 있습니다.</p>
   </header>
 
   <main>
@@ -139,11 +143,12 @@
       <h2 id="encode-heading">텍스트 인코딩</h2>
 
       <label for="source-text">본문</label>
-      <textarea id="source-text" placeholder="한국어 또는 日本語の文章を入力してください。"></textarea>
+      <textarea id="source-text" placeholder="내용을 입력해 주세요."></textarea>
       <div class="actions">
         <button class="primary" id="encode-button" type="button">URL 만들기</button>
         <button id="clear-button" type="button">비우기</button>
       </div>
+      <p id="encode-status" class="status" role="status" aria-live="polite"></p>
 
       <label for="output-url">생성된 URL</label>
       <div id="output-url" class="result" aria-live="polite">아직 생성된 URL이 없습니다.</div>
@@ -162,30 +167,33 @@
     <section class="panel" aria-labelledby="decode-heading">
       <h2 id="decode-heading">URL 디코딩</h2>
       <label for="input-url">인코딩된 URL 또는 t 매개변수 값</label>
-      <textarea id="input-url" placeholder="https://example.com/longtweet?t=z... 또는 z..."></textarea>
+      <textarea id="input-url" placeholder="https://pba.im/l?t=z... 또는 z..."></textarea>
       <div class="actions">
         <button class="primary" id="decode-button" type="button">본문 복원</button>
       </div>
+      <p id="decode-status" class="status" role="status" aria-live="polite"></p>
       <label for="decoded-text">복원된 본문</label>
       <textarea id="decoded-text" readonly placeholder="복원된 텍스트가 여기에 표시됩니다."></textarea>
     </section>
 
-    <p id="status" role="status" aria-live="polite"></p>
-
     <section class="panel">
       <details>
-        <summary>작동 방식 및 참고 사항</summary>
+        <summary>TwExtender에 대한 자세한 정보</summary>
         <ul>
+          <h2>TwExtender에 대해</h2>
+          <li>TwExtender은 그냥 긴 트윗을 쓰고 싶었을 뿐인데 X Premium Basic이 없어지는 바람에 비싼 돈을 내야 하는 건 물론 Pro 플랜으로 잘만 쓰고 있는 Cursor도 쓰레기같은 XAi 통합 플랜으로 바꿔야 해서 화가 난 한 트위터리안 개발자가 멜론이 그렇게 좋아하는 CursorGrok 4.7을 딸깍해서 만든 서비스입니다.</li>
+          <li>기본적으로 트위터가 URL은 얼마나 길든 무조건 23바이트로 계산한다는 점을 이용해, 작성한 긴 트윗을 브라우저에서 압축·인코딩해 URL에 담습니다. 트윗 내용은 URL 주소에 담겨 있으며, 이 서비스는 압축 해제와 디코딩만을 담당합니다.</li>
+          <li>절대로 트윗을 서버에 저장하지 않습니다. 애초에 트윗 내용을 서버로 전송하지도 않습니다. 압축, 인코딩부터 압축 해제, 디코딩까지 서버엔 코드만 저장되어 있고 모든 계산은 기기 안에서 이루어집니다. 이 때문에 일부 브라우저에선 지원되지 않을 수 있습니다.</li>
+          <li>버그 제보 및 개선사항 제안 : <code>soramehato@protonmail.ch</code></li><br>
+          <h2>작동 방식, 참고 사항</h2>
           <li><code>z</code> 접두사: DEFLATE 압축 후 Base64url 인코딩.</li>
           <li><code>d</code> 접두사: 압축하지 않고 UTF-8 바이트를 Base64url 인코딩.</li>
           <li>압축한 바이트가 더 짧을 때만 압축본을 사용합니다.</li>
           <li>브라우저의 <code>CompressionStream</code> / <code>DecompressionStream</code> API를 사용합니다. 지원되지 않는 브라우저에서는 동작하지 않을 수 있습니다.</li>
-          <li>이 예제는 데모입니다. 배포 전 URL 길이 제한, 오류 처리, 압축 해제 크기 제한 및 X의 링크 처리 동작을 실제 환경에서 검증하세요.</li>
-          <li>본문을 화면에 표시할 때는 HTML로 삽입하지 말고 <code>textContent</code> 또는 textarea의 <code>value</code>를 사용하세요.</li>
         </ul>
       </details>
     </section>
-    <footer>클라이언트 측 데모 · 텍스트는 이 페이지에서 처리됩니다.</footer>
+    <footer>TwExtender™&amp; ⓒ2026 SkyWare · Not associated with X Corp.</footer>
   </main>
 
   <script>
@@ -196,10 +204,10 @@
 
     const $ = (id) => document.getElementById(id);
 
-    function setStatus(message, type = "") {
-      const status = $("status");
+    function setStatus(id, message, type = "") {
+      const status = $(id);
       status.textContent = message;
-      status.className = type;
+      status.className = "status" + (type ? " " + type : "");
     }
 
     function toBase64Url(bytes) {
@@ -287,7 +295,7 @@
 
     $("encode-button").addEventListener("click", async () => {
       try {
-        setStatus("");
+        setStatus("encode-status", "");
         const baseUrl = getBaseUrl();
         const encoded = await encodeText($("source-text").value);
         const resultUrl = new URL(baseUrl);
@@ -304,9 +312,13 @@
         $("tweet-button").dataset.url = output;
         $("copy-button").dataset.url = output;
         $("open-button").dataset.url = output;
-        setStatus("URL을 생성했습니다.", "ok");
+        if (output.length >= 4090) {
+          setStatus("encode-status", "URL을 생성했습니다. URL이 너무 길어서 (4090자 이상) 트윗 전송이 실패할 수 있습니다. 만약 트윗을 전송하는 데 실패하는 경우, 여러 번 나눠서 트윗하세요.", "warn");
+        } else {
+          setStatus("encode-status", "URL을 생성했습니다.", "ok");
+        }
       } catch (error) {
-        setStatus(error.message || "URL 생성 중 오류가 발생했습니다.", "err");
+        setStatus("encode-status", error.message || "URL 생성 중 오류가 발생했습니다.", "err");
       }
     });
 
@@ -319,7 +331,7 @@
       $("tweet-button").disabled = true;
       $("copy-button").disabled = true;
       $("open-button").disabled = true;
-      setStatus("");
+      setStatus("encode-status", "");
     });
 
     $("tweet-button").addEventListener("click", () => {
@@ -331,9 +343,9 @@
     $("copy-button").addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText($("copy-button").dataset.url);
-        setStatus("URL을 클립보드에 복사했습니다.", "ok");
+        setStatus("encode-status", "URL을 클립보드에 복사했습니다.", "ok");
       } catch {
-        setStatus("클립보드 접근에 실패했습니다. URL을 직접 선택해 복사하세요.", "err");
+        setStatus("encode-status", "클립보드 접근에 실패했습니다. URL을 직접 선택해 복사하세요.", "err");
       }
     });
 
@@ -344,7 +356,7 @@
 
     $("decode-button").addEventListener("click", async () => {
       try {
-        setStatus("");
+        setStatus("decode-status", "");
         const raw = $("input-url").value.trim();
         if (!raw) throw new Error("URL 또는 t 매개변수 값을 입력하세요.");
 
@@ -360,10 +372,10 @@
 
         const text = await decodeValue(value);
         $("decoded-text").value = text;
-        setStatus("본문을 복원했습니다.", "ok");
+        setStatus("decode-status", "본문을 복원했습니다.", "ok");
       } catch (error) {
         $("decoded-text").value = "";
-        setStatus(error.message || "디코딩 중 오류가 발생했습니다.", "err");
+        setStatus("decode-status", error.message || "디코딩 중 오류가 발생했습니다.", "err");
       }
     });
 
@@ -375,10 +387,10 @@
         if (value !== null) {
           $("input-url").value = window.location.href;
           $("decoded-text").value = await decodeValue(value);
-          setStatus("URL의 본문을 복원했습니다.", "ok");
+          setStatus("decode-status", "URL의 본문을 복원했습니다.", "ok");
         }
       } catch (error) {
-        setStatus("URL의 본문을 복원하지 못했습니다: " + (error.message || "잘못된 데이터"), "err");
+        setStatus("decode-status", "URL의 본문을 복원하지 못했습니다: " + (error.message || "잘못된 데이터"), "err");
       }
     })();
   </script>
