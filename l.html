@@ -70,8 +70,13 @@
       font: inherit;
       padding: .75rem .8rem;
     }
-    #input-url { min-height: 6rem; }
-    #output-url { min-height: 2.25rem; }
+    #input-url,
+    #output-url {
+      min-height: calc(2lh + 1.5rem + 2px);
+      max-height: calc(2lh + 1.5rem + 2px);
+      overflow-y: auto;
+      resize: none;
+    }
     textarea:focus, button:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: 2px;
@@ -88,6 +93,10 @@
       color: var(--text);
     }
     button.primary { background: var(--accent); color: var(--accent-contrast); border-color: transparent; }
+    #tweet-button { background: #1da1f2; border-color: transparent; color: #fff; }
+    #copy-button { border: 2px solid #d4f5a2; }
+    #open-button { border: 2px solid #e3d4fb; }
+    #clear-button { border: 2px solid #ffd6e7; }
     button:disabled { opacity: .5; cursor: not-allowed; }
     .result {
       overflow-wrap: anywhere;
