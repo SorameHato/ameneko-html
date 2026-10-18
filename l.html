@@ -83,7 +83,32 @@
       outline: 2px solid var(--accent);
       outline-offset: 2px;
     }
-    .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+    .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; align-items: center; }
+    #media-add { margin-left: auto; }
+    #media-rows:empty { display: none; }
+    .media-row {
+      display: flex;
+      gap: .4rem;
+      align-items: center;
+      margin-top: .6rem;
+    }
+    .media-row input {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 44px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+      padding: .55rem .7rem;
+    }
+    .media-row button { flex: 0 0 auto; padding: .45rem .65rem; }
+    .media-pin[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--accent-contrast);
+      border-color: transparent;
+    }
     button {
       border: 1px solid var(--border);
       border-radius: 9px;
@@ -147,7 +172,9 @@
       <div class="actions">
         <button class="primary" id="encode-button" type="button">URL 만들기</button>
         <button id="clear-button" type="button">비우기</button>
+        <button id="media-add" type="button" aria-label="미디어 추가">🖼</button>
       </div>
+      <div id="media-rows"></div>
       <p id="encode-status" class="status" role="status" aria-live="polite"></p>
 
       <label for="output-url">생성된 URL</label>
@@ -190,6 +217,8 @@
           <h2>작동 방식, 참고 사항</h2>
           <li><code>z</code> 접두사: DEFLATE 압축 후 Base64url 인코딩.</li>
           <li><code>d</code> 접두사: 압축하지 않고 UTF-8 바이트를 Base64url 인코딩.</li>
+          <li><code>n</code> 접두사: 본문과 미디어 JSON을 DEFLATE 압축 후 Base64url 인코딩.</li>
+          <li><code>m</code> 접두사: 그 JSON을 압축하지 않고 Base64url 인코딩.</li>
           <li>압축한 바이트가 더 짧을 때만 압축본을 사용합니다.</li>
           <li>브라우저의 <code>CompressionStream</code> / <code>DecompressionStream</code> API를 사용합니다. 지원되지 않는 브라우저에서는 동작하지 않을 수 있습니다.</li>
         </ul>
@@ -261,8 +290,8 @@
     }
 
     async function decodeValue(value) {
-      if (!value || !/^[zd]/.test(value)) {
-        throw new Error("데이터는 z 또는 d 접두사로 시작해야 합니다.");
+      if (!value || !/^[zdmn]/.test(value)) {
+        throw new Error("데이터는 z, d, m, n 접두사로 시작해야 합니다.");
       }
 
       const mode = value[0];
@@ -272,7 +301,7 @@
       const MAX_DECODED_BYTES = 2 * 1024 * 1024;
       let bytes;
 
-      if (mode === "z") {
+      if (mode === "z" || mode === "n") {
         bytes = await streamTransform(encodedBytes, "deflate", "decompress");
       } else {
         bytes = encodedBytes;
@@ -282,7 +311,267 @@
         throw new Error("복원된 본문이 데모의 최대 허용 크기(2 MiB)를 초과합니다.");
       }
 
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      if (mode === "z" || mode === "d") return text;
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("미디어 데이터 형식이 올바르지 않습니다.");
+      }
+      if (!data || typeof data.text !== "string") {
+        throw new Error("미디어 데이터 형식이 올바르지 않습니다.");
+      }
+      return data.text;
+    }
+
+    const IMAGE_EXTENSIONS = new Set([
+      "jpg", "jpeg", "jpe", "jfif", "png", "gif", "webp", "avif",
+      "bmp", "tif", "tiff", "heic", "heif", "jxl", "ico"
+    ]);
+
+    function isImageExtension(extension) {
+      return IMAGE_EXTENSIONS.has(extension.toLowerCase());
+    }
+
+    function parseClock(value) {
+      if (value == null) return null;
+      const trimmed = String(value).trim();
+      if (!trimmed) return null;
+      if (/^\d+$/.test(trimmed)) return Number(trimmed);
+      if (/^\d+s$/i.test(trimmed)) return Number(trimmed.slice(0, -1));
+      const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i.exec(trimmed);
+      if (!match || (!match[1] && !match[2] && !match[3])) return undefined;
+      return Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0);
+    }
+
+    function clockFromParams(params, names) {
+      for (const name of names) {
+        if (!params.has(name)) continue;
+        const parsed = parseClock(params.get(name));
+        if (parsed === undefined || !Number.isFinite(parsed)) {
+          throw new Error("YouTube 시작 또는 종료 시각을 읽을 수 없습니다.");
+        }
+        return parsed;
+      }
+      return null;
+    }
+
+    function parseYouTube(raw) {
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        return null;
+      }
+      if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+      const host = url.hostname.toLowerCase().replace(/^www\./, "");
+      if (!["youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtu.be"].includes(host)) {
+        return null;
+      }
+
+      let id = null;
+      if (host === "youtu.be") {
+        id = url.pathname.split("/").filter(Boolean)[0] || "";
+      } else {
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (parts[0] === "watch") id = url.searchParams.get("v") || "";
+        else if (["embed", "shorts", "live", "v"].includes(parts[0])) id = parts[1] || "";
+      }
+      if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return null;
+
+      const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+      let start = null;
+      let end = null;
+      if (url.searchParams.has("start") || url.searchParams.has("t") || hash.has("t") || hash.has("start")) {
+        const params = new URLSearchParams(url.searchParams);
+        if (!params.has("start") && !params.has("t")) {
+          if (hash.has("start")) params.set("start", hash.get("start"));
+          if (hash.has("t")) params.set("t", hash.get("t"));
+        }
+        start = clockFromParams(params, ["start", "t"]);
+      }
+      if (url.searchParams.has("end") || hash.has("end")) {
+        const params = new URLSearchParams(url.searchParams);
+        if (!params.has("end") && hash.has("end")) params.set("end", hash.get("end"));
+        end = clockFromParams(params, ["end"]);
+      }
+
+      let list = url.searchParams.get("list");
+      if (list === "WL") list = null;
+      else if (list && !/^[A-Za-z0-9_-]{2,64}$/.test(list)) return null;
+
+      const item = { type: "youtube", id };
+      if (list) item.list = list;
+      if (start) item.start = start;
+      if (end) item.end = end;
+      return item;
+    }
+
+    function parseTwitterImage(raw) {
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        return null;
+      }
+      if (url.protocol !== "https:" || url.username || url.password) return null;
+      if (url.hostname.toLowerCase() !== "pbs.twimg.com") return null;
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (parts.length !== 2 || parts[0] !== "media") return null;
+
+      let name = parts[1];
+      let size = null;
+      const colon = name.indexOf(":");
+      if (colon !== -1) {
+        size = name.slice(colon + 1);
+        name = name.slice(0, colon);
+      }
+      let extension = null;
+      const dot = name.lastIndexOf(".");
+      let id = name;
+      if (dot !== -1) {
+        extension = name.slice(dot + 1);
+        id = name.slice(0, dot);
+      }
+      if (url.searchParams.get("format")) extension = url.searchParams.get("format");
+      if (url.searchParams.get("name")) size = url.searchParams.get("name");
+      if (!extension || !isImageExtension(extension)) return null;
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+      if (size && !/^[A-Za-z0-9]+$/.test(size)) return null;
+
+      extension = extension.toLowerCase();
+      if (url.searchParams.has("format")) {
+        let canonical = `https://pbs.twimg.com/media/${id}?format=${extension}`;
+        if (size) canonical += `&name=${size}`;
+        return canonical;
+      }
+      let canonical = `https://pbs.twimg.com/media/${id}.${extension}`;
+      if (size) canonical += `:${size}`;
+      return canonical;
+    }
+
+    function parseImgbbImage(raw) {
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        return null;
+      }
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return null;
+      if (url.hostname.toLowerCase() !== "i.ibb.co") return null;
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (!parts.length || parts.some((part) => part === "." || part === ".." || !/^[\w.-]+$/.test(part))) return null;
+      const file = parts[parts.length - 1];
+      const dot = file.lastIndexOf(".");
+      if (dot <= 0 || !isImageExtension(file.slice(dot + 1))) return null;
+      return "https://i.ibb.co/" + parts.join("/");
+    }
+
+    function parseMediaUrl(raw) {
+      const youtube = parseYouTube(raw);
+      if (youtube) return youtube;
+      const twitter = parseTwitterImage(raw);
+      if (twitter) return { type: "image", url: twitter };
+      const imgbb = parseImgbbImage(raw);
+      if (imgbb) return { type: "image", url: imgbb };
+      return null;
+    }
+
+    function createMediaRow() {
+      const row = document.createElement("div");
+      row.className = "media-row";
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.inputMode = "url";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.placeholder = "YouTube, 트위터 이미지, imgbb 링크";
+      input.setAttribute("aria-label", "미디어 링크");
+
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "media-pin";
+      pin.textContent = "📌";
+      pin.setAttribute("aria-pressed", "false");
+
+      const up = document.createElement("button");
+      up.type = "button";
+      up.className = "media-up";
+      up.textContent = "↑";
+      up.setAttribute("aria-label", "위로 이동");
+
+      const down = document.createElement("button");
+      down.type = "button";
+      down.className = "media-down";
+      down.textContent = "↓";
+      down.setAttribute("aria-label", "아래로 이동");
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "media-delete";
+      remove.textContent = "🗑️";
+      remove.setAttribute("aria-label", "삭제");
+
+      row.append(input, pin, up, down, remove);
+      return row;
+    }
+
+    function refreshMediaControls() {
+      const rows = [...$("media-rows").children];
+      rows.forEach((row, index) => {
+        const up = row.querySelector(".media-up");
+        const down = row.querySelector(".media-down");
+        const only = rows.length === 1;
+        up.disabled = only || index === 0;
+        down.disabled = only || index === rows.length - 1;
+        const pin = row.querySelector(".media-pin");
+        const pressed = pin.getAttribute("aria-pressed") === "true";
+        pin.setAttribute("aria-label", pressed ? "고정 해제" : "이 미디어를 페이지 상단에 고정");
+      });
+    }
+
+    function collectMedia() {
+      return [...$("media-rows").children].map((row, index) => {
+        const raw = row.querySelector("input").value.trim();
+        const label = `${index + 1}번째 미디어`;
+        if (!raw) throw new Error(`${label} 링크를 입력하세요.`);
+        let item;
+        try {
+          item = parseMediaUrl(raw);
+        } catch (error) {
+          throw new Error(`${label}: ${error.message}`);
+        }
+        if (!item) {
+          throw new Error(`${label} 주소는 YouTube 영상, pbs.twimg.com/media 이미지, i.ibb.co 이미지만 사용할 수 있습니다.`);
+        }
+        if (row.querySelector(".media-pin").getAttribute("aria-pressed") === "true") item.pin = true;
+        return item;
+      });
+    }
+
+    async function encodeDocument(text, media) {
+      const payload = {
+        text,
+        media: media.map((item) => {
+          const stored = item.type === "youtube"
+            ? { type: "youtube", id: item.id }
+            : { type: "image", url: item.url };
+          if (item.list) stored.list = item.list;
+          if (item.start) stored.start = item.start;
+          if (item.end) stored.end = item.end;
+          if (item.pin) stored.pin = true;
+          return stored;
+        })
+      };
+      const original = new TextEncoder().encode(JSON.stringify(payload));
+      const compressed = await streamTransform(original, "deflate", "compress");
+      if (compressed.length < original.length) {
+        return { value: "n" + toBase64Url(compressed), mode: "JSON DEFLATE + Base64url", bytes: compressed.length };
+      }
+      return { value: "m" + toBase64Url(original), mode: "JSON Base64url (압축 안 함)", bytes: original.length };
     }
 
     function getBaseUrl() {
@@ -299,7 +588,10 @@
       try {
         setStatus("encode-status", "");
         const baseUrl = getBaseUrl();
-        const encoded = await encodeText($("source-text").value);
+        const media = collectMedia();
+        const encoded = media.length
+          ? await encodeDocument($("source-text").value, media)
+          : await encodeText($("source-text").value);
         const resultUrl = new URL(baseUrl);
         resultUrl.searchParams.set("t", encoded.value);
         const output = resultUrl.toString();
@@ -324,8 +616,46 @@
       }
     });
 
+    $("media-add").addEventListener("click", () => {
+      const row = createMediaRow();
+      $("media-rows").appendChild(row);
+      refreshMediaControls();
+      row.querySelector("input").focus();
+    });
+
+    $("media-rows").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      const row = event.target.closest(".media-row");
+      if (!button || !row || !$("media-rows").contains(row)) return;
+
+      if (button.classList.contains("media-delete")) {
+        row.remove();
+        refreshMediaControls();
+        return;
+      }
+      if (button.classList.contains("media-up") && !button.disabled && row.previousElementSibling) {
+        row.parentElement.insertBefore(row, row.previousElementSibling);
+        refreshMediaControls();
+        return;
+      }
+      if (button.classList.contains("media-down") && !button.disabled && row.nextElementSibling) {
+        row.parentElement.insertBefore(row.nextElementSibling, row);
+        refreshMediaControls();
+        return;
+      }
+      if (button.classList.contains("media-pin")) {
+        const wasPressed = button.getAttribute("aria-pressed") === "true";
+        for (const pin of $("media-rows").querySelectorAll(".media-pin")) {
+          pin.setAttribute("aria-pressed", "false");
+        }
+        if (!wasPressed) button.setAttribute("aria-pressed", "true");
+        refreshMediaControls();
+      }
+    });
+
     $("clear-button").addEventListener("click", () => {
       $("source-text").value = "";
+      $("media-rows").replaceChildren();
       $("output-url").textContent = "아직 생성된 URL이 없습니다.";
       $("url-length").textContent = "URL 길이: —";
       $("encoding-mode").textContent = "인코딩: —";
@@ -366,7 +696,7 @@
         if (/^https?:\/\//i.test(raw)) {
           value = new URL(raw).searchParams.get("t") || "";
           if (!value) throw new Error("URL에 t 매개변수가 없습니다.");
-        } else if (raw.includes("=") && !/^[zd]/.test(raw)) {
+        } else if (raw.includes("=") && !/^[zdmn]/.test(raw)) {
           // t=z... 형식도 허용합니다.
           const params = new URLSearchParams(raw);
           value = params.get("t") || "";

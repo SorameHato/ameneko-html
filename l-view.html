@@ -57,11 +57,40 @@
       outline: 2px solid var(--accent);
       outline-offset: 2px;
     }
+    .gallery { display: flex; flex-direction: column; gap: 1rem; margin-top: 1.25rem; }
+    .gallery:empty { display: none; }
+    .gallery iframe,
+    .gallery img,
+    .pinned iframe,
+    .pinned img {
+      display: block;
+      width: 100%;
+      border: 0;
+      border-radius: 12px;
+      background: #000;
+    }
+    .gallery iframe { aspect-ratio: 16 / 9; }
+    .pinned {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 5;
+      background: var(--bg);
+      padding: .5rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .pinned[hidden] { display: none; }
+    .pinned .slot { width: min(40rem, calc(42vh * 16 / 9), 100%); margin: 0 auto; }
+    .pinned iframe { aspect-ratio: 16 / 9; }
+    .pinned img { width: auto; max-width: 100%; max-height: 42vh; margin: 0 auto; object-fit: contain; }
   </style>
 </head>
 <body>
+  <div id="pinned-media" class="pinned" hidden><div class="slot"></div></div>
   <main>
     <p id="content" class="content">본문을 불러오는 중…</p>
+    <div id="gallery" class="gallery"></div>
     <p class="cta"><a href="/l">나도 긴 트윗 작성해보기 →</a></p>
   </main>
   <script>
@@ -92,9 +121,115 @@
       return new Uint8Array(await new Response(stream).arrayBuffer());
     }
 
-    async function decodeValue(value) {
-      if (!value || !/^[zd]/.test(value)) {
-        throw new Error("데이터는 z 또는 d 접두사로 시작해야 합니다.");
+    const IMAGE_EXTENSIONS = new Set([
+      "jpg", "jpeg", "jpe", "jfif", "png", "gif", "webp", "avif",
+      "bmp", "tif", "tiff", "heic", "heif", "jxl", "ico"
+    ]);
+
+    function isImageExtension(extension) {
+      return IMAGE_EXTENSIONS.has(String(extension).toLowerCase());
+    }
+
+    function canonicalImageUrl(raw) {
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        return null;
+      }
+      if (url.protocol !== "https:" || url.username || url.password) return null;
+      const host = url.hostname.toLowerCase();
+      if (host === "pbs.twimg.com") {
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (parts.length !== 2 || parts[0] !== "media") return null;
+        let name = parts[1];
+        let size = null;
+        const colon = name.indexOf(":");
+        if (colon !== -1) {
+          size = name.slice(colon + 1);
+          name = name.slice(0, colon);
+        }
+        let extension = null;
+        const dot = name.lastIndexOf(".");
+        let id = name;
+        if (dot !== -1) {
+          extension = name.slice(dot + 1);
+          id = name.slice(0, dot);
+        }
+        if (url.searchParams.get("format")) extension = url.searchParams.get("format");
+        if (url.searchParams.get("name")) size = url.searchParams.get("name");
+        if (!extension || !isImageExtension(extension) || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+        if (size && !/^[A-Za-z0-9]+$/.test(size)) return null;
+        extension = extension.toLowerCase();
+        if (url.searchParams.has("format")) {
+          let canonical = `https://pbs.twimg.com/media/${id}?format=${extension}`;
+          if (size) canonical += `&name=${size}`;
+          return canonical;
+        }
+        let canonical = `https://pbs.twimg.com/media/${id}.${extension}`;
+        if (size) canonical += `:${size}`;
+        return canonical;
+      }
+      if (host === "i.ibb.co") {
+        if (url.search || url.hash) return null;
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (!parts.length || parts.some((part) => part === "." || part === ".." || !/^[\w.-]+$/.test(part))) return null;
+        const file = parts[parts.length - 1];
+        const dot = file.lastIndexOf(".");
+        if (dot <= 0 || !isImageExtension(file.slice(dot + 1))) return null;
+        return "https://i.ibb.co/" + parts.join("/");
+      }
+      return null;
+    }
+
+    function mediaElement(item) {
+      if (!item || typeof item !== "object") return null;
+      if (item.type === "youtube") {
+        if (!/^[A-Za-z0-9_-]{11}$/.test(item.id || "")) return null;
+        const embed = new URL(`https://www.youtube-nocookie.com/embed/${item.id}`);
+        if (item.list && item.list !== "WL" && /^[A-Za-z0-9_-]{2,64}$/.test(item.list)) {
+          embed.searchParams.set("list", item.list);
+        }
+        if (Number.isInteger(item.start) && item.start > 0) embed.searchParams.set("start", String(item.start));
+        if (Number.isInteger(item.end) && item.end > 0) embed.searchParams.set("end", String(item.end));
+        const iframe = document.createElement("iframe");
+        iframe.src = embed.toString();
+        iframe.allowFullscreen = true;
+        iframe.setAttribute("allow", "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share");
+        iframe.referrerPolicy = "strict-origin-when-cross-origin";
+        return iframe;
+      }
+      if (item.type === "image") {
+        const src = canonicalImageUrl(item.url || "");
+        if (!src) return null;
+        const image = document.createElement("img");
+        image.alt = "";
+        image.src = src;
+        image.referrerPolicy = "no-referrer";
+        return image;
+      }
+      return null;
+    }
+
+    function placeMedia(node, pinned) {
+      if (pinned) {
+        const slot = document.querySelector("#pinned-media .slot");
+        slot.replaceChildren(node);
+        document.getElementById("pinned-media").hidden = false;
+      } else {
+        document.getElementById("gallery").appendChild(node);
+      }
+    }
+
+    function layoutPinned() {
+      const pinned = document.getElementById("pinned-media");
+      const main = document.querySelector("main");
+      main.style.marginTop = pinned.hidden ? "" : `calc(${pinned.offsetHeight}px + 1.5rem)`;
+    }
+
+    async function decodePayload(value) {
+      if (!value || !/^[zdmn]/.test(value)) {
+        throw new Error("데이터는 z, d, m, n 접두사로 시작해야 합니다.");
       }
 
       const mode = value[0];
@@ -102,7 +237,7 @@
       const MAX_DECODED_BYTES = 2 * 1024 * 1024;
       let bytes;
 
-      if (mode === "z") {
+      if (mode === "z" || mode === "n") {
         bytes = await streamTransform(encodedBytes, "deflate", "decompress");
       } else {
         bytes = encodedBytes;
@@ -112,7 +247,19 @@
         throw new Error("복원된 본문이 데모의 최대 허용 크기(2 MiB)를 초과합니다.");
       }
 
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      if (mode === "z" || mode === "d") return { text, media: [] };
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("미디어 데이터 형식이 올바르지 않습니다.");
+      }
+      if (!data || typeof data.text !== "string" || (data.media != null && !Array.isArray(data.media))) {
+        throw new Error("미디어 데이터 형식이 올바르지 않습니다.");
+      }
+      return { text: data.text, media: Array.isArray(data.media) ? data.media : [] };
     }
 
     (async function showTweet() {
@@ -120,7 +267,20 @@
       try {
         const value = new URL(window.location.href).searchParams.get("t");
         if (value === null) throw new Error("표시할 본문이 없습니다.");
-        content.textContent = await decodeValue(value);
+        const payload = await decodePayload(value);
+        content.textContent = payload.text;
+
+        let pinned = false;
+        for (const item of payload.media) {
+          const node = mediaElement(item);
+          if (!node) continue;
+          const pinThis = !pinned && item.pin === true;
+          if (pinThis) pinned = true;
+          placeMedia(node, pinThis);
+          if (node.tagName === "IMG") node.addEventListener("load", layoutPinned);
+        }
+        layoutPinned();
+        window.addEventListener("resize", layoutPinned);
       } catch (error) {
         content.className = "content err";
         content.textContent = error.message || "본문을 표시하지 못했습니다.";
